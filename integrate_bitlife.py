@@ -247,7 +247,8 @@ def integrate(ipa_path, dylib_path, output_path=None):
                         with open(filepath, 'rb') as f:
                             magic = f.read(4)
                             is_macho = magic in (b'\xfe\xed\xfa\xce', b'\xce\xfa\xed\xfe',
-                                                  b'\xfe\xed\xfa\xcf', b'\xcf\xfa\xed\xfe')
+                                                  b'\xfe\xed\xfa\xcf', b'\xcf\xfa\xed\xfe',
+                                                  b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca')
                     except:
                         pass
                     perm = 0o755 if is_macho else 0o644
