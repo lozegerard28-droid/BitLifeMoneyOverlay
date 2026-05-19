@@ -254,6 +254,7 @@ def integrate(ipa_path, dylib_path, output_path=None):
                     perm = 0o755 if is_macho else 0o644
                     info = zipfile.ZipInfo(arcname)
                     info.external_attr = perm << 16
+                    info.compress_type = zipfile.ZIP_DEFLATED
                     with open(filepath, 'rb') as f:
                         zout.writestr(info, f.read())
 
