@@ -1,0 +1,32 @@
+workflows:
+  build-dylib:
+    name: Build MoneyOverlay dylib
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.bitlife.moneyoverlay
+      vars:
+        APP_ID: com.bitlife.moneyoverlay
+      xcode: latest
+    scripts:
+      - name: Build dylib with clang
+        script: |
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -arch arm64 \
+            -isysroot "$SDK_PATH" \
+            -framework UIKit \
+            -framework Foundation \
+            -fobjc-arc \
+            -O2 \
+            -dynamiclib \
+            -install_name @rpath/libMoneyOverlay.dylib \
+            -o "$CM_BUILD_DIR/libMoneyOverlay.dylib" \
+            "$CM_BUILD_DIR/MoneyOverlay.m"
+      - name: Verify dylib
+        script: |
+          file "$CM_BUILD_DIR/libMoneyOverlay.dylib"
+          lipo -info "$CM_BUILD_DIR/libMoneyOverlay.dylib"
+    artifacts:
+      - libMoneyOverlay.dylib
