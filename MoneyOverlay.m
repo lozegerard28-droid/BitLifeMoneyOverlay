@@ -3,17 +3,13 @@
 #import <objc/message.h>
 #import <mach-o/dyld.h>
 #import <mach/mach.h>
-#import <mach/mach_vm.h>
 #import <mach/vm_map.h>
-#import <mach/vm_region.h>
 #import <sys/mman.h>
 
 // ============================================================
 // C O N F I G
 // ============================================================
-// File offset of SimFinances TypeInfo in UnityFramework
 #define SIMFINANCES_TYPEINFO_OFFSET 0x87BCCA0
-// Offset of _bankBalance field in SimFinances object
 #define BANK_BALANCE_OFFSET 0x10
 
 // ============================================================
@@ -26,7 +22,6 @@ static UIButton *floatingButton = nil;
 static uintptr_t g_unityFrameworkBase = 0;
 static uintptr_t g_simFinancesTypeInfoAddr = 0;
 
-// Find UnityFramework base address at runtime
 static uintptr_t find_unity_framework_base(void) {
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
         const char *name = _dyld_get_image_name(i);
@@ -37,47 +32,45 @@ static uintptr_t find_unity_framework_base(void) {
     return 0;
 }
 
-// Scan writable memory for an object with matching Il2CppClass pointer
 static uintptr_t find_simfinances_instance(void) {
     if (!g_simFinancesTypeInfoAddr) return 0;
-    
-    mach_vm_address_t addr = 0;
-    mach_vm_size_t size = 0;
+
+    vm_address_t addr = 0;
+    vm_size_t size = 0;
     natural_t depth = 0;
-    
+
     struct vm_region_submap_info_64 info;
     mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
-    
+
     while (true) {
-        kern_return_t kr = mach_vm_region_recurse_64(
+        kern_return_t kr = vm_region_recurse_64(
             mach_task_self(),
             &addr, &size, &depth,
             (vm_region_recurse_info_64_t)&info,
             &count
         );
-        
+
         if (kr != KERN_SUCCESS) break;
-        
-        // Only scan writable, non-executable regions (heap, data)
+
         if ((info.protection & VM_PROT_WRITE) && !(info.protection & VM_PROT_EXECUTE)) {
             uintptr_t *start = (uintptr_t *)(uintptr_t)addr;
             uintptr_t *end = start + (size / sizeof(uintptr_t));
-            
+
             for (uintptr_t *p = start; p < end; p++) {
                 if (*p == g_simFinancesTypeInfoAddr) {
                     double *balanceField = (double *)((uintptr_t)p + BANK_BALANCE_OFFSET);
                     double val = *balanceField;
-                    
+
                     if (isfinite(val) && val >= 0 && val < 1e15) {
                         return (uintptr_t)p;
                     }
                 }
             }
         }
-        
+
         addr += size;
     }
-    
+
     return 0;
 }
 
@@ -85,7 +78,6 @@ static void write_bank_balance(double amount) {
     uintptr_t instance = find_simfinances_instance();
     if (!instance) {
         NSLog(@"[MoneyOverlay] Could not find SimFinances instance");
-        // Show error on overlay
         dispatch_async(dispatch_get_main_queue(), ^{
             UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 250, 40)];
             toast.center = overlayWindow.center;
@@ -102,23 +94,18 @@ static void write_bank_balance(double amount) {
         });
         return;
     }
-    
-    // Read current balance
+
     double *balanceField = (double *)(instance + BANK_BALANCE_OFFSET);
     double currentBalance = *balanceField;
-    
-    // Write new balance (add amount to current)
     double newBalance = currentBalance + amount;
-    
-    // Make page writable if needed
+
     vm_address_t pageStart = (vm_address_t)balanceField & ~(vm_page_size - 1);
     vm_protect(mach_task_self(), pageStart, vm_page_size, 0, VM_PROT_READ | VM_PROT_WRITE);
-    
+
     *balanceField = newBalance;
-    
+
     NSLog(@"[MoneyOverlay] Balance updated: %.0f + %.0f = %.0f", currentBalance, amount, newBalance);
-    
-    // Show confirmation toast
+
     dispatch_async(dispatch_get_main_queue(), ^{
         UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 200, 40)];
         toast.center = overlayWindow.center;
@@ -136,26 +123,6 @@ static void write_bank_balance(double amount) {
 }
 
 // ============================================================
-// M O N E Y   O V E R L A Y   V I E W   C O N T R O L L E R
-// ============================================================
-
-@implementation MoneyOverlayViewController
-
-- (BOOL)prefersStatusBarHidden {
-    return YES;
-}
-
-- (UIStatusBarStyle)preferredStatusBarStyle {
-    return UIStatusBarStyleDefault;
-}
-
-- (BOOL)shouldAutorotate {
-    return YES;
-}
-
-@end
-
-// ============================================================
 // M O N E Y   O V E R L A Y   M A N A G E R
 // ============================================================
 
@@ -171,32 +138,51 @@ static void write_bank_balance(double amount) {
 
 - (void)setupOverlay {
     if (overlayWindow) return;
-    
+
     g_unityFrameworkBase = find_unity_framework_base();
     if (!g_unityFrameworkBase) {
         NSLog(@"[MoneyOverlay] FATAL: UnityFramework not found");
         return;
     }
-    
+
     g_simFinancesTypeInfoAddr = g_unityFrameworkBase + SIMFINANCES_TYPEINFO_OFFSET;
     NSLog(@"[MoneyOverlay] UnityFramework base: 0x%llX", (uint64_t)g_unityFrameworkBase);
     NSLog(@"[MoneyOverlay] SimFinances TypeInfo: 0x%llX", (uint64_t)g_simFinancesTypeInfoAddr);
-    
+
     dispatch_async(dispatch_get_main_queue(), ^{
-        CGRect screenRect = [UIScreen mainScreen].bounds;
+        // Find the active window scene (iOS 26+)
+        UIWindowScene *targetScene = nil;
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *ws = (UIWindowScene *)scene;
+                if (ws.activationState == UISceneActivationStateForegroundActive) {
+                    targetScene = ws;
+                    break;
+                }
+                if (!targetScene) targetScene = ws;
+            }
+        }
+
+        if (!targetScene) {
+            NSLog(@"[MoneyOverlay] No UIWindowScene found");
+            return;
+        }
+
+        CGRect screenRect = targetScene.coordinateSpace.bounds;
         CGFloat btnSize = 52;
         CGFloat margin = 20;
-        
-        overlayWindow = [[UIWindow alloc] initWithFrame:screenRect];
-        overlayWindow.windowLevel = UIWindowLevelStatusBar + 100;
+
+        overlayWindow = [[UIWindow alloc] initWithWindowScene:targetScene];
+        overlayWindow.frame = screenRect;
+        overlayWindow.windowLevel = UIWindowLevelAlert;
         overlayWindow.backgroundColor = [UIColor clearColor];
         overlayWindow.userInteractionEnabled = YES;
-        
-        MoneyOverlayViewController *rootVC = [[MoneyOverlayViewController alloc] init];
+
+        UIViewController *rootVC = [[UIViewController alloc] init];
         rootVC.view.backgroundColor = [UIColor clearColor];
         rootVC.view.userInteractionEnabled = NO;
         overlayWindow.rootViewController = rootVC;
-        
+
         floatingButton = [UIButton buttonWithType:UIButtonTypeCustom];
         floatingButton.frame = CGRectMake(
             screenRect.size.width - btnSize - margin,
@@ -211,22 +197,20 @@ static void write_bank_balance(double amount) {
         floatingButton.layer.shadowRadius = 4;
         [floatingButton setTitle:@"💰" forState:UIControlStateNormal];
         floatingButton.titleLabel.font = [UIFont systemFontOfSize:24];
-        
-        // Use a target that can receive actions
+
         [floatingButton addTarget:self
                            action:@selector(buttonTapped)
                  forControlEvents:UIControlEventTouchUpInside];
-        
-        // Make draggable
+
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
             initWithTarget:self action:@selector(dragButton:)];
         [floatingButton addGestureRecognizer:pan];
-        
+
         [rootVC.view addSubview:floatingButton];
         [rootVC.view bringSubviewToFront:floatingButton];
-        
+
         overlayWindow.hidden = NO;
-        
+
         NSLog(@"[MoneyOverlay] Overlay ready");
     });
 }
@@ -250,16 +234,16 @@ static void write_bank_balance(double amount) {
         alertControllerWithTitle:@"Ajouter de l'argent"
         message:@"Entrez le montant"
         preferredStyle:UIAlertControllerStyleAlert];
-    
+
     [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
         textField.placeholder = @"Montant (ex: 1000000)";
         textField.keyboardType = UIKeyboardTypeDecimalPad;
     }];
-    
+
     [alert addAction:[UIAlertAction actionWithTitle:@"Annuler"
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
-    
+
     [alert addAction:[UIAlertAction actionWithTitle:@"Ajouter"
                                               style:UIAlertActionStyleDefault
                                             handler:^(UIAlertAction *action) {
@@ -269,7 +253,7 @@ static void write_bank_balance(double amount) {
             write_bank_balance(amount);
         }
     }]];
-    
+
     UIViewController *topVC = overlayWindow.rootViewController;
     while (topVC.presentedViewController) {
         topVC = topVC.presentedViewController;
@@ -286,7 +270,7 @@ static void write_bank_balance(double amount) {
 __attribute__((constructor))
 static void init(void) {
     NSLog(@"[MoneyOverlay] Loading money overlay dylib...");
-    
+
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC),
                    dispatch_get_main_queue(), ^{
         [[MoneyOverlayManager sharedManager] setupOverlay];
