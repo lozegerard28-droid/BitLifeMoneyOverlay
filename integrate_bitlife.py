@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import tempfile
 import struct
+import plistlib
 
 def align(x, a):
     return (x + a - 1) & ~(a - 1)
@@ -32,7 +33,6 @@ def find_app_dir(payload_dir):
 def find_main_binary(app_dir):
     plist_path = os.path.join(app_dir, 'Info.plist')
     if os.path.exists(plist_path):
-        import plistlib
         with open(plist_path, 'rb') as f:
             plist = plistlib.load(f)
         executable = plist.get('CFBundleExecutable')
@@ -241,7 +241,20 @@ def integrate(ipa_path, dylib_path, output_path=None):
                     arcname = os.path.relpath(filepath, tmpdir)
                     if arcname.startswith('entitlements'):
                         continue
-                    zout.write(filepath, arcname)
+                    # Mach-O magic bytes for permission detection
+                    is_macho = False
+                    try:
+                        with open(filepath, 'rb') as f:
+                            magic = f.read(4)
+                            is_macho = magic in (b'\xfe\xed\xfa\xce', b'\xce\xfa\xed\xfe',
+                                                  b'\xfe\xed\xfa\xcf', b'\xcf\xfa\xed\xfe')
+                    except:
+                        pass
+                    perm = 0o755 if is_macho else 0o644
+                    info = zipfile.ZipInfo(arcname)
+                    info.external_attr = perm << 16
+                    with open(filepath, 'rb') as f:
+                        zout.writestr(info, f.read())
 
         print(f"Done! Created {output_path}")
         return True

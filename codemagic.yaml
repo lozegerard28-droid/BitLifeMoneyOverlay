@@ -9,12 +9,12 @@ workflows:
       - name: Build minimal dylib (no framework deps)
         script: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
-          clang -arch arm64 \
+          clang -arch arm64 -arch arm64e \
             -isysroot "$SDK_PATH" \
             -fobjc-arc \
             -O2 \
             -dynamiclib \
-            -install_name @rpath/libMoneyOverlay.dylib \
+            -install_name @executable_path/Frameworks/libMoneyOverlay.dylib \
             -o "$CM_BUILD_DIR/libMoneyOverlay_minimal.dylib" \
             "$CM_BUILD_DIR/MoneyOverlay_minimal.m"
       - name: Verify minimal dylib
@@ -33,14 +33,14 @@ workflows:
       - name: Build dylib with clang
         script: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
-          clang -arch arm64 \
+          clang -arch arm64 -arch arm64e \
             -isysroot "$SDK_PATH" \
             -framework UIKit \
             -framework Foundation \
             -fobjc-arc \
             -O2 \
             -dynamiclib \
-            -install_name @rpath/libMoneyOverlay.dylib \
+            -install_name @executable_path/Frameworks/libMoneyOverlay.dylib \
             -o "$CM_BUILD_DIR/libMoneyOverlay.dylib" \
             "$CM_BUILD_DIR/MoneyOverlay.m"
       - name: Verify dylib

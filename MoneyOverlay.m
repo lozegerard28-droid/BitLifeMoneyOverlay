@@ -23,6 +23,7 @@ static UIButton *floatingButton = nil;
 static uintptr_t g_unityFrameworkBase = 0;
 static uintptr_t g_simFinancesTypeInfoAddr = 0;
 static uintptr_t g_cachedInstance = 0;
+static dispatch_queue_t g_balanceQueue = NULL;
 
 static uintptr_t find_unity_framework_base(void) {
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
@@ -71,53 +72,68 @@ static uintptr_t find_simfinances_instance(void) {
     return 0;
 }
 
+static uintptr_t get_simfinances_instance(void) {
+    if (g_cachedInstance) {
+        uintptr_t typeInfo = *(uintptr_t *)g_cachedInstance;
+        if (typeInfo == g_simFinancesTypeInfoAddr) {
+            return g_cachedInstance;
+        }
+        g_cachedInstance = 0;
+    }
+    g_cachedInstance = find_simfinances_instance();
+    return g_cachedInstance;
+}
+
+static void show_toast(NSString *msg, double duration, UIColor *bgColor) {
+    UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 260, 44)];
+    toast.center = overlayWindow.center;
+    toast.textAlignment = NSTextAlignmentCenter;
+    toast.backgroundColor = bgColor ?: [UIColor colorWithWhite:0 alpha:0.7];
+    toast.textColor = [UIColor whiteColor];
+    toast.text = msg;
+    toast.layer.cornerRadius = 10;
+    toast.clipsToBounds = YES;
+    toast.font = [UIFont boldSystemFontOfSize:16];
+    [overlayWindow addSubview:toast];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)),
+        dispatch_get_main_queue(), ^{
+        [toast removeFromSuperview];
+    });
+}
+
 static void write_bank_balance(double amount) {
-    uintptr_t instance = g_cachedInstance;
-    if (!instance) {
-        instance = find_simfinances_instance();
-        g_cachedInstance = instance;
-    }
-    if (!instance) {
-        NSLog(@"[MoneyOverlay] Could not find SimFinances instance");
-        dispatch_async(dispatch_get_main_queue(), ^{
-            UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 250, 40)];
-            toast.center = overlayWindow.center;
-            toast.textAlignment = NSTextAlignmentCenter;
-            toast.backgroundColor = [UIColor colorWithWhite:0 alpha:0.7];
-            toast.textColor = [UIColor whiteColor];
-            toast.text = @"Erreur: instance introuvable";
-            toast.layer.cornerRadius = 10;
-            toast.clipsToBounds = YES;
-            [overlayWindow addSubview:toast];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                [toast removeFromSuperview];
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        g_balanceQueue = dispatch_queue_create("com.moneyoverlay.balance", DISPATCH_QUEUE_SERIAL);
+    });
+    dispatch_async(g_balanceQueue, ^{
+        uintptr_t instance = get_simfinances_instance();
+        if (!instance) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                show_toast(@"Erreur: instance SimFinances introuvable", 2.0, [UIColor redColor]);
             });
-        });
-        return;
-    }
+            return;
+        }
 
-    double *balanceField = (double *)(instance + BANK_BALANCE_OFFSET);
-    double currentBalance = *balanceField;
-    double newBalance = currentBalance + amount;
+        double *balanceField = (double *)(instance + BANK_BALANCE_OFFSET);
+        double currentBalance = *balanceField;
+        double newBalance = currentBalance + amount;
 
-    vm_address_t pageStart = (vm_address_t)balanceField & ~(vm_page_size - 1);
-    vm_protect(mach_task_self(), pageStart, vm_page_size, 0, VM_PROT_READ | VM_PROT_WRITE);
-    *balanceField = newBalance;
+        vm_address_t pageStart = (vm_address_t)balanceField & ~(vm_page_size - 1);
+        kern_return_t kr = vm_protect(mach_task_self(), pageStart, vm_page_size, 0,
+                                       VM_PROT_READ | VM_PROT_WRITE);
+        if (kr != KERN_SUCCESS) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                show_toast(@"Erreur: impossible d'écrire la mémoire", 2.0, [UIColor redColor]);
+            });
+            return;
+        }
+        *balanceField = newBalance;
 
-    NSLog(@"[MoneyOverlay] Balance updated: %.0f + %.0f = %.0f", currentBalance, amount, newBalance);
+        NSLog(@"[MoneyOverlay] Balance: %.0f + %.0f = %.0f", currentBalance, amount, newBalance);
 
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 200, 40)];
-        toast.center = overlayWindow.center;
-        toast.textAlignment = NSTextAlignmentCenter;
-        toast.backgroundColor = [UIColor colorWithWhite:0 alpha:0.7];
-        toast.textColor = [UIColor whiteColor];
-        toast.text = [NSString stringWithFormat:@"+ %.0f $", amount];
-        toast.layer.cornerRadius = 10;
-        toast.clipsToBounds = YES;
-        [overlayWindow addSubview:toast];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            [toast removeFromSuperview];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            show_toast([NSString stringWithFormat:@"+ %.0f $", amount], 1.5, nil);
         });
     });
 }
@@ -267,7 +283,7 @@ static void write_bank_balance(double amount) {
 // Instead, spawn a simple POSIX thread that waits and triggers later.
 
 static void *delayed_init(void *arg) {
-    sleep(5);
+    sleep(3);
     dispatch_async(dispatch_get_main_queue(), ^{
         [[MoneyOverlayManager sharedManager] setupOverlay];
     });
