@@ -127,6 +127,34 @@ def macho_add_load_dylib(binary_path, dylib_path):
         f.write(data)
     return True
 
+def macho_invalidate_code_signature(binary_path):
+    """
+    Nullifies the LC_CODE_SIGNATURE command so that SideStore
+    MUST re-sign the binary with a valid signature.
+    """
+    with open(binary_path, 'rb') as f:
+        data = bytearray(f.read())
+
+    magic = struct.unpack_from('<I', data, 0)[0]
+    if magic != 0xFEEDFACF:
+        return False
+
+    ncmds = struct.unpack_from('<I', data, 16)[0]
+    off = 32
+    for i in range(ncmds):
+        cmd, cmdsize = struct.unpack_from('<II', data, off)
+        if cmd == 0x1D:  # LC_CODE_SIGNATURE
+            print(f"  Nullifying code signature at offset 0x{off:X}")
+            struct.pack_into('<II', data, off + 8, 0, 0)  # dataoff = 0, datasize = 0
+            with open(binary_path, 'wb') as f:
+                f.write(data)
+            print(f"  Code signature invalidated — SideStore will re-sign")
+            return True
+        off += cmdsize
+
+    print(f"  No LC_CODE_SIGNATURE found (already unsigned)")
+    return True
+
 def get_entitlements(app_dir):
     binary_path = find_main_binary(app_dir)
     if binary_path and os.path.exists(binary_path):
@@ -194,6 +222,12 @@ def integrate(ipa_path, dylib_path, output_path=None):
             print("Binary patched successfully")
         else:
             print("Error: failed to patch binary")
+            return False
+
+        if macho_invalidate_code_signature(binary_path):
+            print("Code signature invalidated")
+        else:
+            print("Error: failed to invalidate code signature")
             return False
 
         # Sign everything with ldid

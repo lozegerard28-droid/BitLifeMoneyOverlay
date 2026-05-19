@@ -290,6 +290,7 @@ static void *delayed_init(void *arg) {
 __attribute__((constructor))
 static void init(void) {
     pthread_t th;
-    pthread_create(&th, NULL, delayed_init, NULL);
-    pthread_detach(th);
+    if (pthread_create(&th, NULL, delayed_init, NULL) == 0) {
+        pthread_detach(th);
+    }
 }
