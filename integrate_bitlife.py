@@ -189,7 +189,7 @@ def integrate(ipa_path, dylib_path, output_path=None):
             return False
 
         print(f"Patching binary: {binary_path}")
-        rpath_path = '@rpath/libMoneyOverlay.dylib'
+        rpath_path = '@executable_path/Frameworks/libMoneyOverlay.dylib'
         if macho_add_load_dylib(binary_path, rpath_path):
             print("Binary patched successfully")
         else:
