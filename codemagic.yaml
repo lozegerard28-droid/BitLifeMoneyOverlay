@@ -4,11 +4,6 @@ workflows:
     max_build_duration: 30
     instance_type: mac_mini_m2
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.bitlife.moneyoverlay
-      vars:
-        APP_ID: com.bitlife.moneyoverlay
       xcode: latest
     scripts:
       - name: Build dylib with clang
