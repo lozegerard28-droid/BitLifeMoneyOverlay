@@ -88,7 +88,7 @@ def macho_add_load_dylib(binary_path, dylib_path):
     dylib_path_padded = dylib_path_bytes + b'\x00' * (align(len(dylib_path_bytes), 8) - len(dylib_path_bytes))
     
     # dylib_command structure:
-    #   cmd (uint32) = 0x0C (LC_LOAD_DYLIB)
+    #   cmd (uint32) = 0x1C (LC_LOAD_WEAK_DYLIB - won't crash app if dylib fails)
     #   cmdsize (uint32) = total size
     #   dylib.offset (uint32) = offset from start of cmd to path
     #   dylib.timestamp (uint32) = 0
@@ -99,7 +99,7 @@ def macho_add_load_dylib(binary_path, dylib_path):
     dylib_off = 24  # offset from start of cmd to path component
     cmd_size = dylib_off + len(dylib_path_padded)
     
-    cmd_data = struct.pack('<II', 0x0C, cmd_size)
+    cmd_data = struct.pack('<II', 0x1C, cmd_size)  # LC_LOAD_WEAK_DYLIB
     cmd_data += struct.pack('<IIII', dylib_off, 0, 0, 0)
     cmd_data += dylib_path_padded
     
@@ -107,8 +107,8 @@ def macho_add_load_dylib(binary_path, dylib_path):
         print(f"Error: command size ({len(cmd_data)}) exceeds gap ({gap_size})")
         return False
 
-    # Insert the command
-    insert_pos = gap_start
+    # Insert the command after the last load command
+    insert_pos = load_cmds_end
     data[insert_pos:insert_pos + len(cmd_data)] = cmd_data
     
     # Update header
@@ -118,7 +118,7 @@ def macho_add_load_dylib(binary_path, dylib_path):
                      MH_MAGIC_64, cputype, cpusubtype, filetype,
                      new_ncmds, new_sizeofcmds, flags, reserved)
     
-    print(f"Added LC_LOAD_DYLIB: {dylib_path}")
+    print(f"Added LC_LOAD_WEAK_DYLIB: {dylib_path}")
     print(f"  ncmds: {ncmds} -> {new_ncmds}")
     print(f"  sizeofcmds: {sizeofcmds} -> {new_sizeofcmds}")
 

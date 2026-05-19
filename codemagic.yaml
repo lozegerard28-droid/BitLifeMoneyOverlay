@@ -1,6 +1,30 @@
 workflows:
-  build-dylib:
-    name: Build MoneyOverlay dylib
+  build-minimal:
+    name: Build minimal test dylib
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+    scripts:
+      - name: Build minimal dylib (no framework deps)
+        script: |
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -arch arm64 \
+            -isysroot "$SDK_PATH" \
+            -fobjc-arc \
+            -O2 \
+            -dynamiclib \
+            -install_name @rpath/libMoneyOverlay.dylib \
+            -o "$CM_BUILD_DIR/libMoneyOverlay_minimal.dylib" \
+            "$CM_BUILD_DIR/MoneyOverlay_minimal.m"
+      - name: Verify minimal dylib
+        script: |
+          file "$CM_BUILD_DIR/libMoneyOverlay_minimal.dylib"
+    artifacts:
+      - libMoneyOverlay_minimal.dylib
+
+  build-full:
+    name: Build full MoneyOverlay dylib
     max_build_duration: 30
     instance_type: mac_mini_m2
     environment:
