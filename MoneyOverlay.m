@@ -5,6 +5,7 @@
 #import <mach/mach.h>
 #import <mach/vm_map.h>
 #import <sys/mman.h>
+#import <pthread.h>
 
 // ============================================================
 // C O N F I G
@@ -49,28 +50,23 @@ static uintptr_t find_simfinances_instance(void) {
             (vm_region_recurse_info_64_t)&info,
             &count
         );
-
         if (kr != KERN_SUCCESS) break;
 
         if ((info.protection & VM_PROT_WRITE) && !(info.protection & VM_PROT_EXECUTE)) {
             uintptr_t *start = (uintptr_t *)(uintptr_t)addr;
             uintptr_t *end = start + (size / sizeof(uintptr_t));
-
             for (uintptr_t *p = start; p < end; p++) {
                 if (*p == g_simFinancesTypeInfoAddr) {
                     double *balanceField = (double *)((uintptr_t)p + BANK_BALANCE_OFFSET);
                     double val = *balanceField;
-
                     if (isfinite(val) && val >= 0 && val < 1e15) {
                         return (uintptr_t)p;
                     }
                 }
             }
         }
-
         addr += size;
     }
-
     return 0;
 }
 
@@ -101,7 +97,6 @@ static void write_bank_balance(double amount) {
 
     vm_address_t pageStart = (vm_address_t)balanceField & ~(vm_page_size - 1);
     vm_protect(mach_task_self(), pageStart, vm_page_size, 0, VM_PROT_READ | VM_PROT_WRITE);
-
     *balanceField = newBalance;
 
     NSLog(@"[MoneyOverlay] Balance updated: %.0f + %.0f = %.0f", currentBalance, amount, newBalance);
@@ -150,7 +145,6 @@ static void write_bank_balance(double amount) {
     NSLog(@"[MoneyOverlay] SimFinances TypeInfo: 0x%llX", (uint64_t)g_simFinancesTypeInfoAddr);
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        // Find the active window scene (iOS 26+)
         UIWindowScene *targetScene = nil;
         for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
             if ([scene isKindOfClass:[UIWindowScene class]]) {
@@ -162,9 +156,12 @@ static void write_bank_balance(double amount) {
                 if (!targetScene) targetScene = ws;
             }
         }
-
         if (!targetScene) {
-            NSLog(@"[MoneyOverlay] No UIWindowScene found");
+            // Retry later if no scene yet
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+                dispatch_get_main_queue(), ^{
+                [self setupOverlay];
+            });
             return;
         }
 
@@ -198,8 +195,7 @@ static void write_bank_balance(double amount) {
         [floatingButton setTitle:@"💰" forState:UIControlStateNormal];
         floatingButton.titleLabel.font = [UIFont systemFontOfSize:24];
 
-        [floatingButton addTarget:self
-                           action:@selector(buttonTapped)
+        [floatingButton addTarget:self action:@selector(buttonTapped)
                  forControlEvents:UIControlEventTouchUpInside];
 
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
@@ -208,7 +204,6 @@ static void write_bank_balance(double amount) {
 
         [rootVC.view addSubview:floatingButton];
         [rootVC.view bringSubviewToFront:floatingButton];
-
         overlayWindow.hidden = NO;
 
         NSLog(@"[MoneyOverlay] Overlay ready");
@@ -218,10 +213,7 @@ static void write_bank_balance(double amount) {
 - (void)dragButton:(UIPanGestureRecognizer *)gesture {
     UIView *view = gesture.view;
     CGPoint translation = [gesture translationInView:view.superview];
-    view.center = CGPointMake(
-        view.center.x + translation.x,
-        view.center.y + translation.y
-    );
+    view.center = CGPointMake(view.center.x + translation.x, view.center.y + translation.y);
     [gesture setTranslation:CGPointMake(0, 0) inView:view.superview];
 }
 
@@ -241,8 +233,7 @@ static void write_bank_balance(double amount) {
     }];
 
     [alert addAction:[UIAlertAction actionWithTitle:@"Annuler"
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
+                                              style:UIAlertActionStyleCancel handler:nil]];
 
     [alert addAction:[UIAlertAction actionWithTitle:@"Ajouter"
                                               style:UIAlertActionStyleDefault
@@ -266,13 +257,21 @@ static void write_bank_balance(double amount) {
 // ============================================================
 // D Y L I B   E N T R Y   P O I N T
 // ============================================================
+// Constructor runs DURING dyld loading (very early).
+// We must NOT call any GCD/UIKit functions here.
+// Instead, spawn a simple POSIX thread that waits and triggers later.
+
+static void *delayed_init(void *arg) {
+    sleep(5);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[MoneyOverlayManager sharedManager] setupOverlay];
+    });
+    return NULL;
+}
 
 __attribute__((constructor))
 static void init(void) {
-    NSLog(@"[MoneyOverlay] Loading money overlay dylib...");
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC),
-                   dispatch_get_main_queue(), ^{
-        [[MoneyOverlayManager sharedManager] setupOverlay];
-    });
+    pthread_t th;
+    pthread_create(&th, NULL, delayed_init, NULL);
+    pthread_detach(th);
 }
