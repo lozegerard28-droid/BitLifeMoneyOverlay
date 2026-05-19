@@ -1,10 +1,6 @@
 #import "MoneyOverlay.h"
-#import <objc/runtime.h>
-#import <objc/message.h>
 #import <mach-o/dyld.h>
 #import <mach/mach.h>
-#import <mach/vm_map.h>
-#import <sys/mman.h>
 #import <pthread.h>
 
 // ============================================================
@@ -85,6 +81,7 @@ static uintptr_t get_simfinances_instance(void) {
 }
 
 static void show_toast(NSString *msg, double duration, UIColor *bgColor) {
+    if (!overlayWindow) return;
     UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 260, 44)];
     toast.center = overlayWindow.center;
     toast.textAlignment = NSTextAlignmentCenter;
