@@ -22,6 +22,7 @@ static UIWindow *overlayWindow = nil;
 static UIButton *floatingButton = nil;
 static uintptr_t g_unityFrameworkBase = 0;
 static uintptr_t g_simFinancesTypeInfoAddr = 0;
+static uintptr_t g_cachedInstance = 0;
 
 static uintptr_t find_unity_framework_base(void) {
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
@@ -71,7 +72,11 @@ static uintptr_t find_simfinances_instance(void) {
 }
 
 static void write_bank_balance(double amount) {
-    uintptr_t instance = find_simfinances_instance();
+    uintptr_t instance = g_cachedInstance;
+    if (!instance) {
+        instance = find_simfinances_instance();
+        g_cachedInstance = instance;
+    }
     if (!instance) {
         NSLog(@"[MoneyOverlay] Could not find SimFinances instance");
         dispatch_async(dispatch_get_main_queue(), ^{

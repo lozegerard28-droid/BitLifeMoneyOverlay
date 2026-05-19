@@ -5,10 +5,5 @@
 @property (class, readonly) MoneyOverlayManager *sharedManager;
 
 - (void)setupOverlay;
-- (void)showMoneyInput;
-
-@end
-
-@interface MoneyOverlayViewController : UIViewController
 
 @end
