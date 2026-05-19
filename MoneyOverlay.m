@@ -168,7 +168,7 @@ static void write_bank_balance(double amount) {
             return;
         }
 
-        CGRect screenRect = targetScene.coordinateSpace.bounds;
+        CGRect screenRect = targetScene.effectiveGeometry.coordinateSpace.bounds;
         CGFloat btnSize = 52;
         CGFloat margin = 20;
 
@@ -222,7 +222,7 @@ static void write_bank_balance(double amount) {
         view.center.x + translation.x,
         view.center.y + translation.y
     );
-    [gesture setTranslation:CGPointZero inView:view.superview];
+    [gesture setTranslation:CGPointMake(0, 0) inView:view.superview];
 }
 
 - (void)buttonTapped {
